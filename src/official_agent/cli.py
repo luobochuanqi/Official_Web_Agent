@@ -248,8 +248,8 @@ async def _run_turn(agent: object, history: list, session: str, callbacks: list)
     历史也由 checkpointer 持久化(MEM-01);返回值供调用方在无 checkpointer
     场景(如测试替身)继续累积。
 
-    OBS-02:轮开头设轮级 trace id(= thread_id),client 层据此兜底注入
-    traceparent;Langfuse 生效时 span 优先,该值实际不生效。
+    OBS-02:轮开头设轮级 trace id(= thread_id,set 时归一为 W3C 32-hex),client 层
+    据此兜底注入 traceparent;Langfuse 生效时 span 优先,该值实际不生效。
     """
     console.print("[bold green]agent>[/bold green] ", end="")
     trace_token = set_turn_trace_id(session)

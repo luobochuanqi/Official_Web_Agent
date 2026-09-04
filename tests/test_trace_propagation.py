@@ -73,7 +73,9 @@ async def test_span_trace_id_injected_on_both_exits(monkeypatch) -> None:
 
 @respx.mock
 async def test_turn_id_fallback_without_span(monkeypatch) -> None:
-    """无 span 时两出口的 trace-id 段 = 轮级 id(thread_id 原值,非 32-hex 也照发)。"""
+    """无 span 时 trace-id 段 = 轮级 id 的 W3C 归一值(非 32-hex → sha256,确定性)。"""
+    import hashlib
+
     import official_agent.observability as obs
 
     monkeypatch.setattr(obs, "_active_span_trace_id", lambda: None)
@@ -91,5 +93,6 @@ async def test_turn_id_fallback_without_span(monkeypatch) -> None:
     finally:
         reset_turn_trace_id(token)
 
-    assert trace_ids_of([api_route, user_route]) == ["cli:u123:a1b2c3d4"] * 2
+    want = hashlib.sha256(b"cli:u123:a1b2c3d4").hexdigest()
+    assert trace_ids_of([api_route, user_route]) == [want] * 2
     await client.aclose()

@@ -18,7 +18,9 @@ Langfuse 只读镜像;同步脚本待 prompt 体系落地后随 GRA 任务补。
 """
 
 import contextvars
+import hashlib
 import logging
+import re
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -28,19 +30,38 @@ from official_agent.config import get_settings
 logger = logging.getLogger(__name__)
 
 _warned_no_config = False
+_HEX32_RE = re.compile(r"[0-9a-f]{32}")
 
 # 兜底值:全零 32-hex。合法 W3C trace-id 段的"显式无效"形式,
 # 两侧日志见到它即知该调用发生在任何对话上下文之外。
 _ZERO_TRACE_ID = "0" * 32
 
-# 轮级 trace id:宿主(CLI/飞书/SSE 入口)每轮 set,值可为任意非空串
-# (CLI 场景为 thread_id,原值透传保对账可读性,不强制 32-hex)。
+# 轮级 trace id:宿主(CLI/飞书/SSE 入口)每轮 set。
+# 值经 set_turn_trace_id 归一为合法 W3C trace-id(32 位小写 hex),
+# header 与审计(#87)共用同一归一值,保证跨端对账同 id。
 _turn_trace_id: contextvars.ContextVar[str] = contextvars.ContextVar("turn_trace_id", default="")
 
 
+def _to_w3c_trace_id(value: str) -> str:
+    """任意串 → 合法 W3C trace-id 段(32 位小写 hex)。
+
+    已是 32 位小写 hex 原样通过;否则 sha256 确定性映射(同值同像,两侧可复算)。
+    空串保持空(= 未设置,由 current_trace_id 的全零兜底接管)。
+    """
+    v = value.lower()
+    if not v or _HEX32_RE.fullmatch(v):
+        return v
+    return hashlib.sha256(v.encode()).hexdigest()
+
+
 def set_turn_trace_id(turn_id: str) -> contextvars.Token[str]:
-    """宿主每轮对话开头调用;用返回的 token 在轮末 reset_turn_trace_id 复位。"""
-    return _turn_trace_id.set(turn_id)
+    """宿主每轮对话开头调用;用返回的 token 在轮末 reset_turn_trace_id 复位。
+
+    非 32-hex 值(如 thread_id `cli:u123:8f3a9c2b`)确定性映射为 32-hex:
+    W3C 规定 trace-id 段必须 32 位小写 hex,严格消费端会丢弃非法头并自生成
+    id,对账即失效(#95 review)。原值可读性由入口日志自行打印,不依赖此字段。
+    """
+    return _turn_trace_id.set(_to_w3c_trace_id(turn_id))
 
 
 def reset_turn_trace_id(token: contextvars.Token[str]) -> None:
